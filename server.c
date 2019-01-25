@@ -61,11 +61,48 @@ int main(int argc, char **argv) {
 	getnameinfo((struct sockaddr *) &clientaddr, clientaddrsize, client_host, sizeof(client_host), client_port, sizeof(client_port), NI_NUMERICHOST | NI_NUMERICSERV);
 	fprintf(stdout, "connected to %s:%s.\n", client_host, client_port);
 
-	char buffer[1024];
-	while(read(client_fd, buffer, sizeof(buffer)-1)) {
-		fprintf(stdout, "%s\n", buffer);
-		fflush(stdout);
+	// Receive file size from the client.
+	long filesize = 0;
+	int status = read(client_fd, &filesize, sizeof(filesize));
+	if(status < 0) {
+   		perror("read");
+		exit(5);
 	}
+	fprintf(stdout, "%d\n", ntohl(filesize));
+	filesize = ntohl(filesize);
+	char *buffer = malloc(filesize+1);
+	buffer[filesize] = '\0';
+	char *tracker = buffer;
+	fprintf(stdout, "debug1\n");
+	ssize_t remaining_bytes = (ssize_t) filesize;
+	fprintf(stdout, "debug2\n");
+	ssize_t read_bytes = 0;
 
+	ssize_t received_bytes;
+	fprintf(stdout, "debug3\n");
+	while(remaining_bytes > 0) {
+		received_bytes = read(client_fd, buffer, remaining_bytes);
+		fprintf(stdout, "received bytes: %zu\n", received_bytes);
+		fprintf(stdout, "remaining bytes: %zu\n", remaining_bytes);
+		fprintf(stdout, "read bytes: %zu\n", read_bytes);
+		if(received_bytes > 0) {
+			read_bytes += received_bytes;
+			fprintf(stdout, "read bytes: %zu\n", read_bytes);
+			remaining_bytes -= received_bytes;
+			fprintf(stdout, "%s", buffer);
+			buffer += read_bytes;
+			
+		}
+		else if(received_bytes == 0) {
+			break;
+		}
+		else {
+			perror("read");
+			exit(5);
+		}
+	}	
+
+	free(tracker);
+//	fflush(stdout);
 	return 0;
 }

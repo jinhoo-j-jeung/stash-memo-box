@@ -56,22 +56,34 @@ int main(int argc, char **argv) {
 	fclose(fp);
 
 	fprintf(stdout, "%s\n", content);
-	//free(content);
-	
+
+	filesize = htonl(filesize);
+	write(sock_fd, &filesize, sizeof(filesize));
+
 	char *tracker = content;
+	filesize = ntohl(filesize);
 	long sent_bytes = 0;
+	fprintf(stdout, "file size : %li\n", filesize);
 	while(sent_bytes < filesize) {
-		if(filesize - sent_bytes < 256) {
-			write(sock_fd, content, filesize - sent_bytes);
+		fprintf(stdout, "sent bytes: %li\n", sent_bytes);
+		if(filesize - sent_bytes < 1024) {
+			if(write(sock_fd, content, filesize - sent_bytes) < 0) {
+				perror("write");
+				exit(5);
+			}
 			content += filesize - sent_bytes;
 			sent_bytes += filesize - sent_bytes; 
 		}
 		else {
-			write(sock_fd, content, 256);
-			content+=256;
-			sent_bytes += 256;
+			if(write(sock_fd, content, 1024) < 0) {
+				perror("write");
+				exit(5);
+			}
+			content+=1024;
+			sent_bytes += 1024;
 		}
 	}
+	fprintf(stdout, "out of while loop: %li\n", sent_bytes);
 
 	// Clean up.
 	free(tracker);
