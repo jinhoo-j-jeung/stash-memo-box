@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
 
 	struct addrinfo hints, *result;
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_INET;
+	hints.ai_family = AF_INET;	
 	hints.ai_socktype = SOCK_STREAM;
 
 	s = getaddrinfo(host, port, &hints, &result);
@@ -45,7 +45,36 @@ int main(int argc, char **argv) {
 		exit(5);
 	}
 	
+	FILE *fp = fopen("test.txt", "r");
+	char *content;
+	fseek(fp, 0, SEEK_END);
+	long filesize = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+	content = malloc(filesize+1);
+	content[filesize] = '\0';
+	fread(content, filesize, 1, fp);
+	fclose(fp);
+
+	fprintf(stdout, "%s\n", content);
+	//free(content);
+	
+	char *tracker = content;
+	long sent_bytes = 0;
+	while(sent_bytes < filesize) {
+		if(filesize - sent_bytes < 256) {
+			write(sock_fd, content, filesize - sent_bytes);
+			content += filesize - sent_bytes;
+			sent_bytes += filesize - sent_bytes; 
+		}
+		else {
+			write(sock_fd, content, 256);
+			content+=256;
+			sent_bytes += 256;
+		}
+	}
+
 	// Clean up.
+	free(tracker);
 	freeaddrinfo(result);
 
 	return 0;
