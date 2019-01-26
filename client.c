@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <dirent.h>
 
 int main(int argc, char **argv) {
 	if(argc != 3) {
@@ -19,7 +20,7 @@ int main(int argc, char **argv) {
 	char *host = argv[1];
 	char *port = argv[2];
 	
-	int s;
+	// Socket
 	int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
 	// Failed to return a file descriptor.
 	if(sock_fd == -1) {
@@ -27,24 +28,46 @@ int main(int argc, char **argv) {
         	exit(5);
 	}
 
+	// Client address information
 	struct addrinfo hints, *result;
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;	
 	hints.ai_socktype = SOCK_STREAM;
-
-	s = getaddrinfo(host, port, &hints, &result);
+	int s = getaddrinfo(host, port, &hints, &result);
 	// The given address is invalid.
 	if(s != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
 		exit(5);
 	}
 
-	// Connect to the given address.
+	// Connect
 	if(connect(sock_fd, result->ai_addr, result->ai_addrlen) == -1) {
 		perror("connect");
 		exit(5);
 	}
 	
+	// Open the current direcotry and find all .txt files.
+	DIR *d = opendir(".");
+	if(!d) {
+		perror("opendir");
+		exit(5);
+	}
+	struct dirent *dir;
+	int num_txt_files = 0;
+	while((dir = readdir(d)) != NULL) {
+		int len_filename = strlen(dir->d_name);
+		if(dir->d_type == DT_REG && strncmp(dir->d_name + len_filename - 4, ".txt", 4) == 0) {
+			fprintf(stdout, "%d\n", len_filename);
+			fprintf(stdout, "%s\n", dir->d_name);
+			num_txt_files += 1;
+			//char *filename = dir->d_name;
+			//write(sock_fd, &filename, strlen(filename)+1);
+		}
+	}
+	closedir(d);
+	fprintf(stdout, "%d\n", num_txt_files);
+	
+	// Open a text file to send to the server.
 	FILE *fp = fopen("test.txt", "r");
 	char *content;
 	fseek(fp, 0, SEEK_END);
@@ -54,12 +77,13 @@ int main(int argc, char **argv) {
 	content[filesize] = '\0';
 	fread(content, filesize, 1, fp);
 	fclose(fp);
-
 	fprintf(stdout, "%s\n", content);
 
+	// Send file size to the server.
 	filesize = htonl(filesize);
 	write(sock_fd, &filesize, sizeof(filesize));
 
+	// Send content data to the server
 	char *tracker = content;
 	filesize = ntohl(filesize);
 	long sent_bytes = 0;
