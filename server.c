@@ -92,22 +92,33 @@ int main(int argc, char **argv) {
 		}
 
 	}
-	
-	// Retreive a filename from the client.
-/*
-	char file_title[1024];
-	int file_title_status = read(client_fd, file_title, 1024);
-	fprintf(stdout, "title: %d\n", strlen(ntohl(file_title)));
-*/
+	int read_status = 0;
+
+	// Receive length of title of file
+	long title_length = 0;
+	read_status = read(client_fd, &title_length, sizeof(title_length));
+	if(read_status < 0) {
+		perror("read");
+		exit(5);
+	}
+	fprintf(stdout, "%d\n", ntohl(title_length));
+	title_length = ntohl(title_length);
+
+	// Retreive a file title from the client.
+	char *title = malloc(title_length+1);
+	title[title_length] = '\0';
+	read_status = read(client_fd, title, title_length);
+	fprintf(stdout, "title: %s\n", title);
 
 	// Open a file with the filename.
 	//If it does not exist, create a file with the name.
-	FILE *fp = fopen("1.txt", "a");
+	FILE *fp = fopen(title, "a");
+	//free(title);
 
 	// Receive file size from the client.
 	long filesize = 0;
-	int status = read(client_fd, &filesize, sizeof(filesize));
-	if(status < 0) {
+	read_status = read(client_fd, &filesize, sizeof(filesize));
+	if(read_status < 0) {
    		perror("read");
 		exit(5);
 	}
@@ -130,7 +141,9 @@ int main(int argc, char **argv) {
 			read_bytes += received_bytes;
 			remaining_bytes -= received_bytes;
 			fprintf(fp, "%s", buffer);
+			fprintf(stderr, "debug1\n");
 			buffer += read_bytes;
+			fprintf(stderr, "debug2\n");
 			
 		}
 		else if(received_bytes == 0) {
@@ -145,5 +158,6 @@ int main(int argc, char **argv) {
 	// Clean up.
 	fclose(fp);
 	//free(tracker);
+
 	return 0;
 }

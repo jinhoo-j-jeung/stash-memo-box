@@ -11,6 +11,44 @@
 #include <fcntl.h>
 #include <dirent.h>
 
+long send_message_size(int sock_fd, long message_size) {
+	long size = htonl(message_size);
+	long sent_bytes = write(sock_fd, &size, sizeof(size));
+	if(sent_bytes <0) {
+		perror("write");
+		exit(5);
+	}
+	return sent_bytes;
+}
+
+// Helper function sending char data to the server socket
+long send_string(int sock_fd, long size, char *content) {
+	long sent_bytes = 0;
+	char *message = content;
+	fprintf(stdout, "message size : %li\n", size);
+	while(sent_bytes < size) {
+		fprintf(stdout, "sent bytes: %li\n", sent_bytes);
+		if(size - sent_bytes < 1024) {
+			if(write(sock_fd, message, size - sent_bytes) < 0) {
+				perror("write");
+				exit(5);
+			}
+			message += size - sent_bytes;
+			sent_bytes += size - sent_bytes; 
+		}
+		else {
+			if(write(sock_fd, message, 1024) < 0) {
+				perror("write");
+				exit(5);
+			}
+			message+=1024;
+			sent_bytes += 1024;
+		}
+	}
+	fprintf(stdout, "Successfully sent bytes: %li\n", sent_bytes);
+	return sent_bytes;
+}
+
 int main(int argc, char **argv) {
 	if(argc != 3) {
 		fprintf(stderr, "Wrong Arguments.\n");	
@@ -45,7 +83,10 @@ int main(int argc, char **argv) {
 		perror("connect");
 		exit(5);
 	}
-	
+
+	// Total bytes that are successfully sent to the server.	
+	long total_sent_bytes = 0;
+
 	// Open the current direcotry and find all .txt files.
 	DIR *d = opendir(".");
 	if(!d) {
@@ -55,62 +96,39 @@ int main(int argc, char **argv) {
 	struct dirent *dir;
 	int num_txt_files = 0;
 	while((dir = readdir(d)) != NULL) {
-		int len_filename = strlen(dir->d_name);
-		if(dir->d_type == DT_REG && strncmp(dir->d_name + len_filename - 4, ".txt", 4) == 0) {
-			fprintf(stdout, "%d\n", len_filename);
-			fprintf(stdout, "%s\n", dir->d_name);
+		char *filename = dir->d_name;
+		long len_filename = strlen(dir->d_name);
+		if(dir->d_type == DT_REG && strncmp(filename + len_filename - 4, ".txt", 4) == 0) {
+			//fprintf(stdout, "%d\n", len_filename);
+			//fprintf(stdout, "%s\n", dir->d_name);
 			num_txt_files += 1;
-			//char *filename = dir->d_name;
-			//write(sock_fd, &filename, strlen(filename)+1);
+
+			total_sent_bytes = send_message_size(sock_fd, len_filename);
+			total_sent_bytes = send_string(sock_fd, strlen(filename), filename);
+
+			FILE *fp = fopen(filename, "r");
+			char *content;
+			fseek(fp, 0, SEEK_END);
+			long filesize = ftell(fp);
+			fseek(fp, 0, SEEK_SET);
+			content = malloc(filesize+1);
+			content[filesize] = '\0';
+			fread(content, filesize, 1, fp);
+			fclose(fp);
+
+			total_sent_bytes += send_message_size(sock_fd, filesize);
+			total_sent_bytes += send_string(sock_fd, filesize, content);
+
+			free(content);
 		}
 	}
 	closedir(d);
-	fprintf(stdout, "%d\n", num_txt_files);
-	
-	// Open a text file to send to the server.
-	FILE *fp = fopen("test.txt", "r");
-	char *content;
-	fseek(fp, 0, SEEK_END);
-	long filesize = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
-	content = malloc(filesize+1);
-	content[filesize] = '\0';
-	fread(content, filesize, 1, fp);
-	fclose(fp);
-	fprintf(stdout, "%s\n", content);
+	//fprintf(stdout, "%d\n", num_txt_files);
 
-	// Send file size to the server.
-	filesize = htonl(filesize);
-	write(sock_fd, &filesize, sizeof(filesize));
 
-	// Send content data to the server
-	char *tracker = content;
-	filesize = ntohl(filesize);
-	long sent_bytes = 0;
-	fprintf(stdout, "file size : %li\n", filesize);
-	while(sent_bytes < filesize) {
-		fprintf(stdout, "sent bytes: %li\n", sent_bytes);
-		if(filesize - sent_bytes < 1024) {
-			if(write(sock_fd, content, filesize - sent_bytes) < 0) {
-				perror("write");
-				exit(5);
-			}
-			content += filesize - sent_bytes;
-			sent_bytes += filesize - sent_bytes; 
-		}
-		else {
-			if(write(sock_fd, content, 1024) < 0) {
-				perror("write");
-				exit(5);
-			}
-			content+=1024;
-			sent_bytes += 1024;
-		}
-	}
-	fprintf(stdout, "out of while loop: %li\n", sent_bytes);
+	fprintf(stdout, "total sent bytes: %li\n", total_sent_bytes);
 
 	// Clean up.
-	free(tracker);
 	freeaddrinfo(result);
 
 	return 0;
