@@ -94,70 +94,84 @@ int main(int argc, char **argv) {
 	}
 	int read_status = 0;
 
-	// Receive length of title of file
-	long title_length = 0;
-	read_status = read(client_fd, &title_length, sizeof(title_length));
-	if(read_status < 0) {
+	long num_txt_files = 0;
+	read_status = read(client_fd, &num_txt_files, sizeof(num_txt_files));
+	if(read_status < 0){
 		perror("read");
 		exit(5);
 	}
-	fprintf(stdout, "%d\n", ntohl(title_length));
-	title_length = ntohl(title_length);
+	fprintf(stdout, "Number of .txt files to receive: %d\n", ntohl(num_txt_files));
+	num_txt_files = ntohl(num_txt_files);
 
-	// Retreive a file title from the client.
-	char *title = malloc(title_length+1);
-	title[title_length] = '\0';
-	read_status = read(client_fd, title, title_length);
-	fprintf(stdout, "title: %s\n", title);
-
-	// Open a file with the filename.
-	//If it does not exist, create a file with the name.
-	FILE *fp = fopen(title, "a");
-	//free(title);
-
-	// Receive file size from the client.
-	long filesize = 0;
-	read_status = read(client_fd, &filesize, sizeof(filesize));
-	if(read_status < 0) {
-   		perror("read");
-		exit(5);
-	}
-	fprintf(stdout, "%d\n", ntohl(filesize));
-	filesize = ntohl(filesize);
-
-	// Receive content data from the client.
-	char *buffer = malloc(filesize+1);
-	buffer[filesize] = '\0';
-	char *tracker = buffer;
-	ssize_t remaining_bytes = (ssize_t) filesize;
-	ssize_t read_bytes = 0;
-	ssize_t received_bytes;
-	while(remaining_bytes > 0) {
-		received_bytes = read(client_fd, buffer, remaining_bytes);
-		fprintf(stdout, "received bytes: %zu\n", received_bytes);
-		fprintf(stdout, "remaining bytes: %zu\n", remaining_bytes);
-		fprintf(stdout, "read bytes: %zu\n", read_bytes);
-		if(received_bytes > 0) {
-			read_bytes += received_bytes;
-			remaining_bytes -= received_bytes;
-			fprintf(fp, "%s", buffer);
-			fprintf(stderr, "debug1\n");
-			buffer += read_bytes;
-			fprintf(stderr, "debug2\n");
-			
-		}
-		else if(received_bytes == 0) {
-			break;
-		}
-		else {
+	while(num_txt_files > 0) {
+		// Receive length of title of file
+		long title_length = 0;
+		read_status = read(client_fd, &title_length, sizeof(title_length));
+		if(read_status < 0) {
 			perror("read");
 			exit(5);
 		}
-	}	
+		fprintf(stdout, "%d\n", ntohl(title_length));
+		title_length = ntohl(title_length);
 
-	// Clean up.
-	fclose(fp);
-	//free(tracker);
+		// Retreive a file title from the client.
+		char *title = malloc(title_length+1);
+		title[title_length] = '\0';
+		read_status = read(client_fd, title, title_length);
+		fprintf(stdout, "title: %s\n", title);
+
+		// Open a file with the filename.
+		//If it does not exist, create a file with the name.
+		FILE *fp = fopen(title, "a");
+
+		// Receive file size from the client.
+		long filesize = 0;
+		read_status = read(client_fd, &filesize, sizeof(filesize));
+		if(read_status < 0) {
+	   		perror("read");
+			exit(5);
+		}
+		fprintf(stdout, "%d\n", ntohl(filesize));
+		filesize = ntohl(filesize);
+
+		// Receive content data from the client.
+		char *buffer = malloc(filesize+1);
+		buffer[filesize] = '\0';
+		char *tracker = buffer;
+		ssize_t remaining_bytes = (ssize_t) filesize;
+		ssize_t read_bytes = 0;
+		ssize_t received_bytes;
+		while(remaining_bytes > 0) {
+			received_bytes = read(client_fd, buffer, remaining_bytes);
+			fprintf(stdout, "received bytes: %zu\n", received_bytes);
+			fprintf(stdout, "remaining bytes: %zu\n", remaining_bytes);
+			fprintf(stdout, "read bytes: %zu\n", read_bytes);
+			if(received_bytes > 0) {
+				read_bytes += received_bytes;
+				remaining_bytes -= received_bytes;
+				fprintf(fp, "%s", buffer);
+				buffer += read_bytes;
+			
+			}
+			else if(received_bytes == 0) {
+				break;
+			}
+			else {
+				perror("read");
+				exit(5);
+			}
+		}	
+
+		// Clean up.
+		fclose(fp);
+		free(title);
+		free(tracker);
+		num_txt_files -= 1;
+	}
+
+	// Clean up
+	shutdown(client_fd, SHUT_WR);
+	freeaddrinfo(result);
 
 	return 0;
 }

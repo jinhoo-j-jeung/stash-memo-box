@@ -11,6 +11,14 @@
 #include <fcntl.h>
 #include <dirent.h>
 
+// Linked list to save a filename and its length
+typedef struct node {
+	long message_size;
+	char *message;
+	struct node *next;
+} node_t;
+
+// Helper function sending long data to the server socket
 long send_message_size(int sock_fd, long message_size) {
 	long size = htonl(message_size);
 	long sent_bytes = write(sock_fd, &size, sizeof(size));
@@ -87,6 +95,13 @@ int main(int argc, char **argv) {
 	// Total bytes that are successfully sent to the server.	
 	long total_sent_bytes = 0;
 
+	// Total number of text files that will be sent to the server.
+	long num_txt_files = 0;
+
+	// Linked list for saving .txt filename and its length.
+	node_t *head = malloc(sizeof(node_t));
+	node_t *tail = head;
+
 	// Open the current direcotry and find all .txt files.
 	DIR *d = opendir(".");
 	if(!d) {
@@ -94,41 +109,58 @@ int main(int argc, char **argv) {
 		exit(5);
 	}
 	struct dirent *dir;
-	int num_txt_files = 0;
 	while((dir = readdir(d)) != NULL) {
 		char *filename = dir->d_name;
 		long len_filename = strlen(dir->d_name);
-		if(dir->d_type == DT_REG && strncmp(filename + len_filename - 4, ".txt", 4) == 0) {
-			//fprintf(stdout, "%d\n", len_filename);
-			//fprintf(stdout, "%s\n", dir->d_name);
+		if(dir->d_type == DT_REG && strncmp(filename + len_filename - 4, ".txt", 4) == 0) {		
 			num_txt_files += 1;
-
-			total_sent_bytes = send_message_size(sock_fd, len_filename);
-			total_sent_bytes = send_string(sock_fd, strlen(filename), filename);
-
-			FILE *fp = fopen(filename, "r");
-			char *content;
-			fseek(fp, 0, SEEK_END);
-			long filesize = ftell(fp);
-			fseek(fp, 0, SEEK_SET);
-			content = malloc(filesize+1);
-			content[filesize] = '\0';
-			fread(content, filesize, 1, fp);
-			fclose(fp);
-
-			total_sent_bytes += send_message_size(sock_fd, filesize);
-			total_sent_bytes += send_string(sock_fd, filesize, content);
-
-			free(content);
+			tail->message_size = len_filename;
+			tail->message = filename;
+			tail->next = malloc(sizeof(node_t));
+			tail = tail->next;
+			tail->message_size = 0;
+			tail->message = NULL;
 		}
 	}
 	closedir(d);
-	//fprintf(stdout, "%d\n", num_txt_files);
 
+	// Send the total number of text files to be sent.
+	//fprintf(stdout, "%li\n", num_txt_files);
+	total_sent_bytes += send_message_size(sock_fd, num_txt_files);
+
+	// Send the actual content of txt files saved in the linked list.
+	node_t *iter = head;
+	while(iter->message) {
+		total_sent_bytes += send_message_size(sock_fd, iter->message_size);
+		total_sent_bytes += send_string(sock_fd, strlen(iter->message), iter->message);
+
+		FILE *fp = fopen(iter->message, "r");
+		char *content;
+		fseek(fp, 0, SEEK_END);
+		long filesize = ftell(fp);
+		fseek(fp, 0, SEEK_SET);
+		content = malloc(filesize+1);
+		content[filesize] = '\0';
+		fread(content, filesize, 1, fp);
+		fclose(fp);
+
+		total_sent_bytes += send_message_size(sock_fd, filesize);
+		total_sent_bytes += send_string(sock_fd, filesize, content);
+
+		free(content);
+		iter = iter->next;
+	}
 
 	fprintf(stdout, "total sent bytes: %li\n", total_sent_bytes);
 
 	// Clean up.
+	iter = head;
+	while(iter) {
+		node_t *temp = iter->next;
+		free(iter);
+		iter = temp;
+	}
+	shutdown(sock_fd, SHUT_WR);
 	freeaddrinfo(result);
 
 	return 0;
