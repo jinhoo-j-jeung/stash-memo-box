@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <dirent.h>
+#include <math.h>
 
 // Linked list to save a filename and its length
 typedef struct node {
@@ -30,19 +31,23 @@ long send_message_size(int sock_fd, long message_size) {
 }
 
 // Helper function sending char data to the server socket
-long send_string(int sock_fd, long size, char *content) {
+long send_title(int sock_fd, long size, char *content) {
 	long sent_bytes = 0;
+
+	// Print the name of the file to be sent to the server.
 	char *message = content;
-	fprintf(stdout, "message size : %li\n", size);
+	fprintf(stdout, "%-15.15s ", content);
+
+	ssize_t written_bytes;
 	while(sent_bytes < size) {
-		fprintf(stdout, "sent bytes: %li\n", sent_bytes);
 		if(size - sent_bytes < 1024) {
-			if(write(sock_fd, message, size - sent_bytes) < 0) {
+			written_bytes = write(sock_fd, message, size - sent_bytes);
+			if(written_bytes < 0) {
 				perror("write");
 				exit(5);
 			}
 			message += size - sent_bytes;
-			sent_bytes += size - sent_bytes; 
+			sent_bytes += size - sent_bytes;
 		}
 		else {
 			if(write(sock_fd, message, 1024) < 0) {
@@ -53,7 +58,36 @@ long send_string(int sock_fd, long size, char *content) {
 			sent_bytes += 1024;
 		}
 	}
-	fprintf(stdout, "Successfully sent bytes: %li\n", sent_bytes);
+	return sent_bytes;
+}
+
+
+// Helper function sending char data to the server socket
+long send_message(int sock_fd, long size, char *content) {
+	long sent_bytes = 0;
+	ssize_t written_bytes;
+	char *message = content;
+	while(sent_bytes < size) {
+		if(size - sent_bytes < 1024) {
+			written_bytes = write(sock_fd, message, size - sent_bytes);
+			if(written_bytes < 0) {
+				perror("write");
+				exit(5);
+			}
+			message += size - sent_bytes;
+			sent_bytes += size - sent_bytes;
+		}
+		else {
+			written_bytes = write(sock_fd, message, 1024);
+			if(written_bytes < 0) {
+				perror("write");
+				exit(5);
+			}
+			message+=1024;
+			sent_bytes += 1024;
+		}
+	}
+	fprintf(stdout, "%7li bytes trnasferred", sent_bytes);
 	return sent_bytes;
 }
 
@@ -129,10 +163,13 @@ int main(int argc, char **argv) {
 	total_sent_bytes += send_message_size(sock_fd, num_txt_files);
 
 	// Send the actual content of txt files saved in the linked list.
+	int saved[num_txt_files];
+	int count = 0;
 	node_t *iter = head;
 	while(iter->message) {
+		// Send a filename and its length.
 		total_sent_bytes += send_message_size(sock_fd, iter->message_size);
-		total_sent_bytes += send_string(sock_fd, strlen(iter->message), iter->message);
+		total_sent_bytes += send_title(sock_fd, strlen(iter->message), iter->message);
 
 		FILE *fp = fopen(iter->message, "r");
 		char *content;
@@ -142,16 +179,54 @@ int main(int argc, char **argv) {
 		content = malloc(filesize+1);
 		content[filesize] = '\0';
 		fread(content, filesize, 1, fp);
-		fclose(fp);
+		fclose(fp);	
 
+		// Send the content of the file and its size.
 		total_sent_bytes += send_message_size(sock_fd, filesize);
-		total_sent_bytes += send_string(sock_fd, filesize, content);
+		total_sent_bytes += send_message(sock_fd, filesize, content);
 
+		// Receive the size of the file saved in the server from the server.
+		long saved_content_size = 0;
+		int read_status = read(sock_fd, &saved_content_size, sizeof(saved_content_size));
+		if(read_status < 0) {
+	   		perror("read");
+			exit(5);
+		}
+		saved_content_size = (long) ntohl(saved_content_size);
+
+		// Print whether the file is successfully transfered or not.
+		saved[count] = (filesize == saved_content_size);
+		if(saved[count]) {
+			fprintf(stdout, " Success\n");
+		}
+		else {
+			fprintf(stdout, " Fail\n");
+		}
+
+		// Iteration
+		count += 1;
 		free(content);
 		iter = iter->next;
 	}
 
-	fprintf(stdout, "total sent bytes: %li\n", total_sent_bytes);
+	// Print the total number of bytes sent to the sever.
+	fprintf(stdout, "total sent bytes: %li bytes\n", total_sent_bytes);
+
+	// Check whether the entire files are saved successfully.
+	int entirely_saved = 1;
+	int partially_saved = 0;
+	for(int i = 0; i < count; i++) {
+		if(saved[i]) partially_saved = 1;
+		else entirely_saved = 0;
+	}
+	if(!entirely_saved && partially_saved) {
+		fprintf(stderr, "Files are partially saved.\n");
+		exit(1);
+	}
+	if(!entirely_saved && !partially_saved) {
+		fprintf(stderr, "No files are saved.\n");
+		exit(2);
+	}
 
 	// Clean up.
 	iter = head;
@@ -161,7 +236,6 @@ int main(int argc, char **argv) {
 		iter = temp;
 	}
 	shutdown(sock_fd, SHUT_WR);
-	freeaddrinfo(result);
-
+	freeaddrinfo(result);	
 	return 0;
 }
