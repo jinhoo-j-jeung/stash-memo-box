@@ -92,11 +92,11 @@ long send_message(int sock_fd, long size, char *content) {
 }
 
 int main(int argc, char **argv) {
+	// client requires 2 arguments: host and port.
 	if(argc != 3) {
 		fprintf(stderr, "Wrong Arguments.\n");	
 		exit(11);
 	}
-
 	char *host = argv[1];
 	char *port = argv[2];
 	

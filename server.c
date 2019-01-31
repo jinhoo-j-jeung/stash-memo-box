@@ -41,9 +41,19 @@ long receive_message(int client_fd, long size, char *buffer) {
 	return received_bytes;
 }
 
-int main(int argc, char **argv) {	
-	char *port = argv[1];
-
+int main(int argc, char **argv) {
+	// server has 1 essential argument and 1 optional argument: port and directory name.
+	char *port;
+	char *folder = NULL;
+	if(argc != 3 && argc != 2) {
+		fprintf(stderr, "Wrong Arguments.\n");	
+		exit(11);
+	}
+	else {
+		port = argv[1];
+		if(argc == 3) folder = argv[2];
+	}
+	
 	// Socket
 	int server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	// Failed to return a file descriptor.
@@ -65,6 +75,7 @@ int main(int argc, char **argv) {
 		exit(5);
 	}
 
+
 	// Make the port instantly reusable.
 	int optval = 1;
 	setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
@@ -74,6 +85,16 @@ int main(int argc, char **argv) {
 		perror("bind");
 		exit(5);
 	}
+
+	// If port is "0", then bind() assigns any available port.
+	// Print the port number.
+	struct sockaddr_in serveraddr;
+	socklen_t serveraddrlen = sizeof(serveraddr);
+	if (getsockname(server_fd, (struct sockaddr *) &serveraddr, &serveraddrlen) == -1) {
+		perror("getsockname");
+		exit(5);
+	}
+	fprintf(stdout, "port %d is open for connections.\n", ntohs(serveraddr.sin_port));
 
 	// Listen
 	if(listen(server_fd, 1)) {
@@ -95,24 +116,27 @@ int main(int argc, char **argv) {
 	// Client address information
 	char client_host[256], client_port[256];
 	getnameinfo((struct sockaddr *) &clientaddr, clientaddrsize, client_host, sizeof(client_host), client_port, sizeof(client_port), NI_NUMERICHOST | NI_NUMERICSERV);
-	fprintf(stdout, "connected to %s:%s.\n", client_host, client_port);
+	fprintf(stdout, "connected to %s:%s\n", client_host, client_port);
+
+	// If directory is not specified, use the IP address of the client as a directory name.
+	if(folder == NULL) folder = client_host;
 	
 	// Create a new directory with the client's address
 	struct stat st;
 	// If the directory does not exist already, make a new directory.
-	if(stat(client_host, &st) == -1) {
-		if(mkdir(client_host, 0700) == -1) {
+	if(stat(folder, &st) == -1) {
+		if(mkdir(folder, 0700) == -1) {
 			perror("mkdir");
 			exit(5);
 		}
-		if(chdir(client_host) == -1) {
+		if(chdir(folder) == -1) {
 			perror("chdir");
 			exit(5);
 		}
 	}
 	// If exists, Check if the directory is empty.
 	else {
-		if(chdir(client_host) == -1) {
+		if(chdir(folder) == -1) {
 			perror("chdir");
 			exit(5);
 		}
@@ -134,6 +158,7 @@ int main(int argc, char **argv) {
 		}
 
 	}
+
 	int read_status = 0;
 	
 	// Total bytes that are successfully received by the server.
@@ -146,7 +171,6 @@ int main(int argc, char **argv) {
 		perror("read");
 		exit(5);
 	}
-	fprintf(stdout, "Number of .txt files to receive: %d\n", ntohl(num_txt_files));
 	total_received_bytes += read_status;
 
 	num_txt_files = ntohl(num_txt_files);
@@ -173,7 +197,7 @@ int main(int argc, char **argv) {
 		read_status = read(client_fd, title, title_length);
 		if(read_status < 0) {
 			perror("read");
-			exit(5);
+			exit(5);	
 		}
 		fprintf(stdout, "%-15.15s", title);
 		total_received_bytes += read_status;
@@ -193,7 +217,7 @@ int main(int argc, char **argv) {
 	   		perror("read");
 			exit(5);
 		}
-		fprintf(stdout, "%d\n", ntohl(filesize));
+		fprintf(stdout, "%7d bytes transferred ", ntohl(filesize));
 		filesize = ntohl(filesize);
 		total_received_bytes += read_status;
 
@@ -206,6 +230,7 @@ int main(int argc, char **argv) {
 		buffer[filesize] = '\0';
 		total_received_bytes += receive_message(client_fd, filesize, buffer);
 		fprintf(fp, "%s", buffer);
+		// What happens if the file is too big?
 
 		// Compare the filesize and the actual saved size
 		long sent_bytes = 0;
@@ -214,6 +239,12 @@ int main(int argc, char **argv) {
 		long saved_filesize = ftell(fp);
 		sent_bytes += send_message_size(client_fd, saved_filesize);
 		saved[count] = (saved_filesize == filesize);
+		if(saved[count]) {
+			fprintf(stdout, " Success\n");
+		}
+		else {
+			fprintf(stdout, " Fail\n");
+		}
 		count += 1;
 		fclose(fp);		
 		
