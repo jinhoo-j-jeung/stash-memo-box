@@ -10,7 +10,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <dirent.h>
-#include <math.h>
+#include <signal.h>
 
 // Linked list to save a filename and its length
 typedef struct node {
@@ -18,6 +18,19 @@ typedef struct node {
 	char *message;
 	struct node *next;
 } node_t;
+
+//
+void signal_handler(int sig) {
+	if(sig == SIGINT) {
+		fprintf(stderr, "SIGINT Caught!\n");
+		exit(111);
+	}
+	if(sig == SIGHUP) {
+		fprintf(stderr, "SIGHUP Caught!\n");
+		exit(111);
+	}
+}
+
 
 // Helper function sending long data to the server socket
 long send_message_size(int sock_fd, long message_size) {
@@ -30,7 +43,7 @@ long send_message_size(int sock_fd, long message_size) {
 	return sent_bytes;
 }
 
-// Helper function sending char data to the server socket
+// Helper function sending filename to the server socket
 long send_title(int sock_fd, long size, char *content) {
 	long sent_bytes = 0;
 
@@ -62,7 +75,7 @@ long send_title(int sock_fd, long size, char *content) {
 }
 
 
-// Helper function sending char data to the server socket
+// Helper function sending content of the file to the server socket
 long send_message(int sock_fd, long size, char *content) {
 	long sent_bytes = 0;
 	ssize_t written_bytes;
@@ -92,6 +105,17 @@ long send_message(int sock_fd, long size, char *content) {
 }
 
 int main(int argc, char **argv) {
+	// Print pid for testing signal-catching.	
+	fprintf(stderr, "pid: %d\n", getpid());
+
+	// Catch SIGINT and SIGHUP.
+	struct sigaction sa;
+	sa.sa_handler = signal_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = 0;
+	sigaction(SIGINT, &sa, NULL);
+	sigaction(SIGHUP, &sa, NULL);
+
 	// client requires 2 arguments: host and port.
 	if(argc != 3) {
 		fprintf(stderr, "Wrong Arguments.\n");	
@@ -203,14 +227,17 @@ int main(int argc, char **argv) {
 			fprintf(stdout, " Fail\n");
 		}
 
+		// Clean up
+		free(content);
+
 		// Iteration
 		count += 1;
-		free(content);
 		iter = iter->next;
 	}
 
-	// Print the total number of bytes sent to the sever.
+	// Print the total number of bytes sent to the sever and close the socket.
 	fprintf(stdout, "total sent bytes: %li bytes\n", total_sent_bytes);
+	shutdown(sock_fd, SHUT_WR);
 
 	// Check whether the entire files are saved successfully.
 	int entirely_saved = 1;
@@ -235,7 +262,7 @@ int main(int argc, char **argv) {
 		free(iter);
 		iter = temp;
 	}
-	shutdown(sock_fd, SHUT_WR);
-	freeaddrinfo(result);	
+	freeaddrinfo(result);
+
 	return 0;
 }

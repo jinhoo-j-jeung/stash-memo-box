@@ -8,7 +8,22 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <dirent.h>
-#include <math.h>
+#include <signal.h>
+
+long num_txt_files = 0;
+char *title = NULL;
+
+//
+void signal_handler(int sig) {
+	if(sig == SIGINT) {
+		fprintf(stderr, "SIGINT Caught!\n");
+		exit(111);
+	}
+	if(sig == SIGHUP) {
+		fprintf(stderr, "%s is being transferred: %li files left.\n", title, num_txt_files);	
+	}
+}
+
 
 // Helper function sending long data to the server socket
 long send_message_size(int sock_fd, long message_size) {
@@ -42,6 +57,17 @@ long receive_message(int client_fd, long size, char *buffer) {
 }
 
 int main(int argc, char **argv) {
+	// Print pid for testing signal-catching.	
+	fprintf(stdout, "pid: %d\n", getpid());
+
+	// Catch SIGINT and SIGHUP.
+	struct sigaction sa;
+	sa.sa_handler = signal_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = 0;
+	sigaction(SIGINT, &sa, NULL);
+	sigaction(SIGHUP, &sa, NULL);
+
 	// server has 1 essential argument and 1 optional argument: port and directory name.
 	char *port;
 	char *folder = NULL;
@@ -121,7 +147,7 @@ int main(int argc, char **argv) {
 	// If directory is not specified, use the IP address of the client as a directory name.
 	if(folder == NULL) folder = client_host;
 	
-	// Create a new directory with the client's address
+	// Create a new directory
 	struct stat st;
 	// If the directory does not exist already, make a new directory.
 	if(stat(folder, &st) == -1) {
@@ -165,7 +191,6 @@ int main(int argc, char **argv) {
 	long total_received_bytes = 0;
 
 	// Receive the total number of .txt files to be sent by the client.
-	long num_txt_files = 0;
 	read_status = read(client_fd, &num_txt_files, sizeof(num_txt_files));
 	if(read_status < 0){
 		perror("read");
@@ -188,7 +213,7 @@ int main(int argc, char **argv) {
 		total_received_bytes += read_status;
 
 		// Retreive a file title from the client.
-		char *title = malloc(title_length+1);
+		title = malloc(title_length+1);
 		if(title == NULL) {
 			perror("malloc");
 			exit(5);
@@ -229,6 +254,8 @@ int main(int argc, char **argv) {
 		}
 		buffer[filesize] = '\0';
 		total_received_bytes += receive_message(client_fd, filesize, buffer);
+
+		// Save data in buffer to the file.
 		fprintf(fp, "%s", buffer);
 		// What happens if the file is too big?
 
@@ -250,7 +277,7 @@ int main(int argc, char **argv) {
 		
 		// If a file is not saved successfully, it is removed.
 		int remove_status = 0;
-		if(saved_filesize != filesize) remove_status = remove(title);
+		if(!saved[count]) remove_status = remove(title);
 		if(remove_status < 0) {
 			perror("remove");
 		}
@@ -258,11 +285,15 @@ int main(int argc, char **argv) {
 		// Clean up.
 		free(title);
 		free(buffer);
+
+		// Iterations
 		num_txt_files -= 1;
+		sleep(3);
 	}
 	
-	// Print the total number of bytes received by the sever.
+	// Print the total number of bytes received by the sever and close the client socket.
 	fprintf(stdout, "total received bytes: %li bytes\n", total_received_bytes);
+	shutdown(client_fd, SHUT_WR);
 
 	// Check whether the entire files are saved successfully.
 	int entirely_saved = 1;
@@ -273,17 +304,14 @@ int main(int argc, char **argv) {
 	}
 	if(!entirely_saved && partially_saved) {
 		fprintf(stderr, "Files are partially saved.\n");
-		shutdown(client_fd, SHUT_WR);
 		exit(1);
 	}
 	if(!entirely_saved && !partially_saved) {
 		fprintf(stderr, "No files are saved.\n");
-		shutdown(client_fd, SHUT_WR);
 		exit(2);
 	}
 
 	// Clean up
-	shutdown(client_fd, SHUT_WR);
 	freeaddrinfo(result);
 
 	return 0;
