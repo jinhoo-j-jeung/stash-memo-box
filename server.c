@@ -248,7 +248,7 @@ int main(int argc, char **argv) {
 			perror("read");
 			close_server(5);
 		}
-		fprintf(stdout, "%-15.15s", title);
+		fprintf(stdout, "%-30.30s", title);
 		total_received_bytes += read_status;
 
 		// Open a file with the filename.

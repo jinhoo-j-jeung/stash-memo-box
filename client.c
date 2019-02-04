@@ -76,7 +76,7 @@ long send_title(int sock_fd, long size, char *content) {
 
 	// Print the name of the file to be sent to the server.
 	char *message = content;
-	fprintf(stdout, "%-15.15s ", content);
+	fprintf(stdout, "%-30.30s ", content);
 
 	ssize_t written_bytes;
 	while(sent_bytes < size) {
@@ -212,7 +212,6 @@ int main(int argc, char **argv) {
 	int saved[num_txt_files];
 	int count = 0;
 	node_t *iter = head;
-
 	while(iter->message) {
 		// Send a filename and its length.
 		title = iter->message;
