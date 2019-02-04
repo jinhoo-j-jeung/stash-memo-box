@@ -19,18 +19,45 @@ typedef struct node {
 	struct node *next;
 } node_t;
 
-//
+// Global vaiables
+int sock_fd;	
+struct addrinfo hints, *result;
+struct node *head, *tail;
+long num_txt_files = 0;
+char *title;
+char *content;
+
+// Helper function cleaning up before exiting.
+void close_client(int exit_code) {
+	shutdown(sock_fd, SHUT_WR);
+	if(result != NULL) {
+		freeaddrinfo(result);
+	}
+	if(head != NULL) {
+		node_t *iter = head;
+		while(iter) {
+			node_t *temp = iter->next;
+			free(iter);
+			iter = temp;
+		}
+	}
+	if(content != NULL) {
+		free(content);
+	}
+	exit(exit_code);
+}
+
+// Custom signal handler
 void signal_handler(int sig) {
 	if(sig == SIGINT) {
 		fprintf(stderr, "SIGINT Caught!\n");
-		exit(111);
+		// need to get exit int variable before exiting.
+		close_client(5);
 	}
 	if(sig == SIGHUP) {
-		fprintf(stderr, "SIGHUP Caught!\n");
-		exit(111);
+		fprintf(stderr, "'%s' is being transferred: %li files left.\n", title, num_txt_files-1);	
 	}
 }
-
 
 // Helper function sending long data to the server socket
 long send_message_size(int sock_fd, long message_size) {
@@ -74,7 +101,6 @@ long send_title(int sock_fd, long size, char *content) {
 	return sent_bytes;
 }
 
-
 // Helper function sending content of the file to the server socket
 long send_message(int sock_fd, long size, char *content) {
 	long sent_bytes = 0;
@@ -105,9 +131,6 @@ long send_message(int sock_fd, long size, char *content) {
 }
 
 int main(int argc, char **argv) {
-	// Print pid for testing signal-catching.	
-	fprintf(stderr, "pid: %d\n", getpid());
-
 	// Catch SIGINT and SIGHUP.
 	struct sigaction sa;
 	sa.sa_handler = signal_handler;
@@ -118,14 +141,17 @@ int main(int argc, char **argv) {
 
 	// client requires 2 arguments: host and port.
 	if(argc != 3) {
-		fprintf(stderr, "Wrong Arguments.\n");	
+		fprintf(stderr, "%s: usage: %s server_addr server_port\n", argv[0], argv[0]);	
 		exit(11);
 	}
 	char *host = argv[1];
 	char *port = argv[2];
-	
+
+	// Print pid for testing signal-catching.	
+	fprintf(stderr, "pid: %d\n", getpid());
+
 	// Socket
-	int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+	sock_fd = socket(AF_INET, SOCK_STREAM, 0);
 	// Failed to return a file descriptor.
 	if(sock_fd == -1) {
         	perror("socket");
@@ -133,7 +159,6 @@ int main(int argc, char **argv) {
 	}
 
 	// Client address information
-	struct addrinfo hints, *result;
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;	
 	hints.ai_socktype = SOCK_STREAM;
@@ -141,30 +166,27 @@ int main(int argc, char **argv) {
 	// The given address is invalid.
 	if(s != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
-		exit(5);
+		close_client(5);
 	}
 
 	// Connect
 	if(connect(sock_fd, result->ai_addr, result->ai_addrlen) == -1) {
 		perror("connect");
-		exit(5);
+		close_client(5);
 	}
 
 	// Total bytes that are successfully sent to the server.	
 	long total_sent_bytes = 0;
 
-	// Total number of text files that will be sent to the server.
-	long num_txt_files = 0;
-
 	// Linked list for saving .txt filename and its length.
-	node_t *head = malloc(sizeof(node_t));
-	node_t *tail = head;
+	head = malloc(sizeof(node_t));
+	tail = head;
 
 	// Open the current direcotry and find all .txt files.
 	DIR *d = opendir(".");
 	if(!d) {
 		perror("opendir");
-		exit(5);
+		close_client(5);
 	}
 	struct dirent *dir;
 	while((dir = readdir(d)) != NULL) {
@@ -190,13 +212,14 @@ int main(int argc, char **argv) {
 	int saved[num_txt_files];
 	int count = 0;
 	node_t *iter = head;
+
 	while(iter->message) {
 		// Send a filename and its length.
+		title = iter->message;
 		total_sent_bytes += send_message_size(sock_fd, iter->message_size);
 		total_sent_bytes += send_title(sock_fd, strlen(iter->message), iter->message);
 
 		FILE *fp = fopen(iter->message, "r");
-		char *content;
 		fseek(fp, 0, SEEK_END);
 		long filesize = ftell(fp);
 		fseek(fp, 0, SEEK_SET);
@@ -212,9 +235,16 @@ int main(int argc, char **argv) {
 		// Receive the size of the file saved in the server from the server.
 		long saved_content_size = 0;
 		int read_status = read(sock_fd, &saved_content_size, sizeof(saved_content_size));
-		if(read_status < 0) {
-	   		perror("read");
-			exit(5);
+		while(read_status < 0) {
+			// If read gets interrupted by SIGHUP, try again.
+			if(errno == EINTR) {
+				read_status = read(sock_fd, &saved_content_size, sizeof(saved_content_size));
+				sleep(2);
+			}
+			else {
+	   			perror("read");
+				close_client(5);
+			}
 		}
 		saved_content_size = (long) ntohl(saved_content_size);
 
@@ -229,15 +259,16 @@ int main(int argc, char **argv) {
 
 		// Clean up
 		free(content);
+		content = NULL;
 
 		// Iteration
+		num_txt_files -= 1;
 		count += 1;
 		iter = iter->next;
 	}
 
 	// Print the total number of bytes sent to the sever and close the socket.
 	fprintf(stdout, "total sent bytes: %li bytes\n", total_sent_bytes);
-	shutdown(sock_fd, SHUT_WR);
 
 	// Check whether the entire files are saved successfully.
 	int entirely_saved = 1;
@@ -248,21 +279,15 @@ int main(int argc, char **argv) {
 	}
 	if(!entirely_saved && partially_saved) {
 		fprintf(stderr, "Files are partially saved.\n");
-		exit(1);
+		close_client(1);
 	}
 	if(!entirely_saved && !partially_saved) {
 		fprintf(stderr, "No files are saved.\n");
-		exit(2);
+		close_client(2);
 	}
 
 	// Clean up.
-	iter = head;
-	while(iter) {
-		node_t *temp = iter->next;
-		free(iter);
-		iter = temp;
-	}
-	freeaddrinfo(result);
+	close_client(0);
 
 	return 0;
 }

@@ -7,20 +7,37 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <errno.h>
 #include <dirent.h>
 #include <signal.h>
 
+// Global variables
 long num_txt_files = 0;
-char *title = NULL;
+char title[256], *buffer;
+int client_fd, server_fd;	
+struct addrinfo hints, *result;
 
-//
+// Helper function cleaning up before exiting.
+void close_server(int exit_code) {
+	shutdown(client_fd, SHUT_WR);
+	shutdown(server_fd, SHUT_WR);
+	if(result != NULL) {
+		freeaddrinfo(result);
+	}
+	if(buffer != NULL) {
+		free(buffer);
+	}
+	exit(exit_code);
+}
+
+// Custom signal handler
 void signal_handler(int sig) {
 	if(sig == SIGINT) {
-		fprintf(stderr, "SIGINT Caught!\n");
-		exit(111);
+		fprintf(stderr, "SIGINT raised: closing down.\n");
+		close_server(5);
 	}
 	if(sig == SIGHUP) {
-		fprintf(stderr, "%s is being transferred: %li files left.\n", title, num_txt_files);	
+		fprintf(stderr, "'%s' is being transferred: %li files left.\n", title, num_txt_files-1);	
 	}
 }
 
@@ -31,7 +48,7 @@ long send_message_size(int sock_fd, long message_size) {
 	long sent_bytes = write(sock_fd, &size, sizeof(size));
 	if(sent_bytes <0) {
 		perror("write");
-		exit(5);
+		close_server(5);
 	}
 	return sent_bytes;
 }
@@ -50,16 +67,13 @@ long receive_message(int client_fd, long size, char *buffer) {
 		else if(read_bytes == 0) break;
 		else {
 			perror("read");
-			exit(5);
+			close_server(5);
 		}
 	}
 	return received_bytes;
 }
 
 int main(int argc, char **argv) {
-	// Print pid for testing signal-catching.	
-	fprintf(stdout, "pid: %d\n", getpid());
-
 	// Catch SIGINT and SIGHUP.
 	struct sigaction sa;
 	sa.sa_handler = signal_handler;
@@ -72,7 +86,7 @@ int main(int argc, char **argv) {
 	char *port;
 	char *folder = NULL;
 	if(argc != 3 && argc != 2) {
-		fprintf(stderr, "Wrong Arguments.\n");	
+		fprintf(stderr, "%s: usage: %s port [target_directory(optional)]\n", argv[0], argv[0]);	
 		exit(11);
 	}
 	else {
@@ -80,8 +94,11 @@ int main(int argc, char **argv) {
 		if(argc == 3) folder = argv[2];
 	}
 	
+	// Print pid for testing signal-catching.	
+	fprintf(stdout, "pid: %d\n", getpid());
+
 	// Socket
-	int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	// Failed to return a file descriptor.
 	if(server_fd == -1) {
         	perror("socket");
@@ -89,7 +106,6 @@ int main(int argc, char **argv) {
 	}
 
 	// Server address information
-	struct addrinfo hints, *result;
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
@@ -98,6 +114,8 @@ int main(int argc, char **argv) {
 	// The given address is invalid.
 	if(s != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+		shutdown(server_fd, SHUT_WR);
+		freeaddrinfo(result);
 		exit(5);
 	}
 
@@ -109,6 +127,8 @@ int main(int argc, char **argv) {
 	// Bind
 	if(bind(server_fd, result->ai_addr, result->ai_addrlen)) {
 		perror("bind");
+		shutdown(server_fd, SHUT_WR);
+		freeaddrinfo(result);
 		exit(5);
 	}
 
@@ -118,6 +138,8 @@ int main(int argc, char **argv) {
 	socklen_t serveraddrlen = sizeof(serveraddr);
 	if (getsockname(server_fd, (struct sockaddr *) &serveraddr, &serveraddrlen) == -1) {
 		perror("getsockname");
+		shutdown(server_fd, SHUT_WR);
+		freeaddrinfo(result);
 		exit(5);
 	}
 	fprintf(stdout, "port %d is open for connections.\n", ntohs(serveraddr.sin_port));
@@ -125,6 +147,8 @@ int main(int argc, char **argv) {
 	// Listen
 	if(listen(server_fd, 1)) {
 		perror("listen");
+		shutdown(server_fd, SHUT_WR);
+		freeaddrinfo(result);
 		exit(5);
 	}
 
@@ -132,10 +156,12 @@ int main(int argc, char **argv) {
 	struct sockaddr_storage clientaddr;
 	socklen_t clientaddrsize = sizeof(clientaddr);
 	memset(&clientaddr, 0, sizeof(struct sockaddr));
-	int client_fd = accept(server_fd, (struct sockaddr *) &clientaddr, &clientaddrsize);
+	client_fd = accept(server_fd, (struct sockaddr *) &clientaddr, &clientaddrsize);
 	// Failed to connect.
 	if(client_fd == -1) {
 		perror("accept");
+		shutdown(server_fd, SHUT_WR);
+		freeaddrinfo(result);
 		exit(5);	
 	}
 
@@ -153,23 +179,23 @@ int main(int argc, char **argv) {
 	if(stat(folder, &st) == -1) {
 		if(mkdir(folder, 0700) == -1) {
 			perror("mkdir");
-			exit(5);
+			close_server(5);
 		}
 		if(chdir(folder) == -1) {
 			perror("chdir");
-			exit(5);
+			close_server(5);
 		}
 	}
 	// If exists, Check if the directory is empty.
 	else {
 		if(chdir(folder) == -1) {
 			perror("chdir");
-			exit(5);
+			close_server(5);
 		}
 		DIR *d = opendir(".");
 		if(d == NULL) {
 			perror("opendir");
-			exit(5);
+			close_server(5);
 		}
 		struct dirent *dir;
 		int count = 0;	
@@ -180,9 +206,9 @@ int main(int argc, char **argv) {
 		// If the directory is not empty, exit.
 		if(count > 2) {
 			fprintf(stderr, "The target directory is not empty.\n");
-			exit(3);
+			closedir(d);
+			close_server(3);
 		}
-
 	}
 
 	int read_status = 0;
@@ -194,12 +220,15 @@ int main(int argc, char **argv) {
 	read_status = read(client_fd, &num_txt_files, sizeof(num_txt_files));
 	if(read_status < 0){
 		perror("read");
-		exit(5);
+		close_server(5);
 	}
 	total_received_bytes += read_status;
 
 	num_txt_files = ntohl(num_txt_files);
 	int saved[num_txt_files];
+	for(int i = 0; i < num_txt_files; i++) {
+		saved[num_txt_files] = 0;
+	}
 	int count = 0;
 	while(num_txt_files > 0) {
 		// Receive length of title of file
@@ -207,22 +236,17 @@ int main(int argc, char **argv) {
 		read_status = read(client_fd, &title_length, sizeof(title_length));
 		if(read_status < 0) {
 			perror("read");
-			exit(5);
+			close_server(5);
 		}
 		title_length = ntohl(title_length);
 		total_received_bytes += read_status;
 
-		// Retreive a file title from the client.
-		title = malloc(title_length+1);
-		if(title == NULL) {
-			perror("malloc");
-			exit(5);
-		}
+		// Retreive a file title from the client.			
 		title[title_length] = '\0';
 		read_status = read(client_fd, title, title_length);
 		if(read_status < 0) {
 			perror("read");
-			exit(5);	
+			close_server(5);
 		}
 		fprintf(stdout, "%-15.15s", title);
 		total_received_bytes += read_status;
@@ -232,7 +256,7 @@ int main(int argc, char **argv) {
 		FILE *fp = fopen(title, "a");
 		if(fp == NULL) {
 			perror("fopen");
-			exit(5);
+			close_server(5);
 		}
 
 		// Receive file size from the client.
@@ -240,17 +264,17 @@ int main(int argc, char **argv) {
 		read_status = read(client_fd, &filesize, sizeof(filesize));
 		if(read_status < 0) {
 	   		perror("read");
-			exit(5);
+			close_server(5);
 		}
 		fprintf(stdout, "%7d bytes transferred ", ntohl(filesize));
 		filesize = ntohl(filesize);
 		total_received_bytes += read_status;
 
 		// Receive content data from the client.
-		char *buffer = malloc(filesize+1);
+		buffer = malloc(filesize+1);
 		if(buffer == NULL) {
 			perror("malloc");
-			exit(5);
+			close_server(5);
 		}
 		buffer[filesize] = '\0';
 		total_received_bytes += receive_message(client_fd, filesize, buffer);
@@ -272,28 +296,32 @@ int main(int argc, char **argv) {
 		else {
 			fprintf(stdout, " Fail\n");
 		}
-		count += 1;
 		fclose(fp);		
 		
 		// If a file is not saved successfully, it is removed.
 		int remove_status = 0;
-		if(!saved[count]) remove_status = remove(title);
+		if(!saved[count]) {
+			fprintf(stderr, "removing %s.\n", title);
+			remove_status = remove(title);
+
+		}
 		if(remove_status < 0) {
 			perror("remove");
+			close_server(5);
 		}
 
 		// Clean up.
-		free(title);
 		free(buffer);
+		buffer = NULL;
 
 		// Iterations
-		num_txt_files -= 1;
 		sleep(3);
+		count += 1;
+		num_txt_files -= 1;
 	}
 	
 	// Print the total number of bytes received by the sever and close the client socket.
 	fprintf(stdout, "total received bytes: %li bytes\n", total_received_bytes);
-	shutdown(client_fd, SHUT_WR);
 
 	// Check whether the entire files are saved successfully.
 	int entirely_saved = 1;
@@ -304,14 +332,16 @@ int main(int argc, char **argv) {
 	}
 	if(!entirely_saved && partially_saved) {
 		fprintf(stderr, "Files are partially saved.\n");
-		exit(1);
+		close_server(1);
 	}
 	if(!entirely_saved && !partially_saved) {
 		fprintf(stderr, "No files are saved.\n");
-		exit(2);
+		close_server(2);
 	}
 
 	// Clean up
+	shutdown(client_fd, SHUT_WR);
+	shutdown(server_fd, SHUT_WR);
 	freeaddrinfo(result);
 
 	return 0;
