@@ -22,7 +22,7 @@ typedef struct node {
 // Global vaiables
 int sock_fd;	
 struct addrinfo hints, *result;
-struct node *head, *tail;
+node_t *head = NULL;
 long num_txt_files = 0;
 char *title;
 char *content;
@@ -37,6 +37,7 @@ void close_client(int exit_code) {
 		node_t *iter = head;
 		while(iter) {
 			node_t *temp = iter->next;
+			free(iter->message);
 			free(iter);
 			iter = temp;
 		}
@@ -166,13 +167,21 @@ int main(int argc, char **argv) {
 	// The given address is invalid.
 	if(s != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
-		close_client(5);
+		shutdown(sock_fd, SHUT_WR);
+		if(result != NULL) {
+			freeaddrinfo(result);
+		}
+		exit(5);
 	}
 
 	// Connect
 	if(connect(sock_fd, result->ai_addr, result->ai_addrlen) == -1) {
 		perror("connect");
-		close_client(5);
+		shutdown(sock_fd, SHUT_WR);
+		if(result != NULL) {
+			freeaddrinfo(result);
+		}
+		exit(5);
 	}
 
 	// Total bytes that are successfully sent to the server.	
@@ -180,7 +189,7 @@ int main(int argc, char **argv) {
 
 	// Linked list for saving .txt filename and its length.
 	head = malloc(sizeof(node_t));
-	tail = head;
+	node_t *tail = head;
 
 	// Open the current direcotry and find all .txt files.
 	DIR *d = opendir(".");
@@ -195,11 +204,14 @@ int main(int argc, char **argv) {
 		if(dir->d_type == DT_REG && strncmp(filename + len_filename - 4, ".txt", 4) == 0) {		
 			num_txt_files += 1;
 			tail->message_size = len_filename;
-			tail->message = filename;
+			tail->message = malloc(len_filename+1);
+			strncpy(tail->message, filename, len_filename);
+			tail->message[len_filename] = '\0';
 			tail->next = malloc(sizeof(node_t));
 			tail = tail->next;
 			tail->message_size = 0;
 			tail->message = NULL;
+			tail->next = NULL;
 		}
 	}
 	closedir(d);
@@ -214,8 +226,7 @@ int main(int argc, char **argv) {
 	node_t *iter = head;
 	while(iter->message) {
 		// Send a filename and its length.
-		title = iter->message;
-		total_sent_bytes += send_message_size(sock_fd, iter->message_size);
+		total_sent_bytes += send_message_size(sock_fd, iter->message_size);		
 		total_sent_bytes += send_title(sock_fd, strlen(iter->message), iter->message);
 
 		FILE *fp = fopen(iter->message, "r");
@@ -286,7 +297,15 @@ int main(int argc, char **argv) {
 	}
 
 	// Clean up.
-	close_client(0);
+	iter = head;
+	while(iter) {
+		node_t *temp = iter->next;
+		free(iter->message);
+		free(iter);
+		iter = temp;
+	}
+	freeaddrinfo(result);
+	shutdown(sock_fd, SHUT_WR);
 
 	return 0;
 }
