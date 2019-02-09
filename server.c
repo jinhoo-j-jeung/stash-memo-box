@@ -119,7 +119,6 @@ int main(int argc, char **argv) {
 		exit(5);
 	}
 
-
 	// Make the port instantly reusable.
 	int optval = 1;
 	setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));

@@ -24,8 +24,7 @@ int sock_fd;
 struct addrinfo hints, *result;
 node_t *head = NULL;
 long num_txt_files = 0;
-char *title;
-char *content;
+char title[256], *content;
 
 // Helper function cleaning up before exiting.
 void close_client(int exit_code) {
@@ -52,7 +51,10 @@ void close_client(int exit_code) {
 void signal_handler(int sig) {
 	if(sig == SIGINT) {
 		fprintf(stderr, "SIGINT Caught!\n");
-		// need to get exit int variable before exiting.
+		close_client(5);
+	}
+	if(sig == SIGPIPE) {
+		fprintf(stderr, "SIGPIPE Caught!\n");
 		close_client(5);
 	}
 	if(sig == SIGHUP) {
@@ -217,7 +219,6 @@ int main(int argc, char **argv) {
 	closedir(d);
 
 	// Send the total number of text files to be sent.
-	//fprintf(stdout, "%li\n", num_txt_files);
 	total_sent_bytes += send_message_size(sock_fd, num_txt_files);
 
 	// Send the actual content of txt files saved in the linked list.
@@ -226,6 +227,7 @@ int main(int argc, char **argv) {
 	node_t *iter = head;
 	while(iter->message) {
 		// Send a filename and its length.
+		strncpy(title, iter->message, iter->message_size);
 		total_sent_bytes += send_message_size(sock_fd, iter->message_size);		
 		total_sent_bytes += send_title(sock_fd, strlen(iter->message), iter->message);
 
