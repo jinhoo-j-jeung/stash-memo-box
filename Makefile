@@ -1,5 +1,5 @@
 CC = gcc
-DIRECTORIES = $(wildcard */)
+DIRECTORIES = "$(wildcard */)"
 
 make: server.o client.o
 	$(CC) -o client client.o
@@ -10,4 +10,4 @@ make: server.o client.o
 clean:
 	@rm client
 	@rm server
-	@if [ $(DIRECTORIES) ]; then rm -r $(DIRECTORIES); fi;
+	@if [ $(DIRECTORIES) ]; then rm -r "$(DIRECTORIES)"; fi;
