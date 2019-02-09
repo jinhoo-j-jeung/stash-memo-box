@@ -10,4 +10,6 @@ make: server.o client.o
 clean:
 	@rm client
 	@rm server
+	@rm client.o
+	@rm server.o
 	@if [ $(DIRECTORIES) ]; then rm -r "$(DIRECTORIES)"; fi;
