@@ -233,11 +233,11 @@ int main(int argc, char **argv) {
 			tail->message = malloc(len_filename+1);
 			strncpy(tail->message, filename, len_filename);
 			tail->message[len_filename] = '\0';
-			tail->next = malloc(sizeof(node_t));
+			tail->next = malloc(sizeof(node_t)); //
 			tail = tail->next;
 			tail->message_size = 0;
 			tail->message = NULL;
-			tail->next = NULL;
+			tail->next = NULL; //
 		}
 	}
 	closedir(d);
@@ -284,7 +284,6 @@ int main(int argc, char **argv) {
 			// If read gets interrupted by SIGHUP, try again.
 			if(errno == EINTR) {
 				read_status = read(sock_fd, &saved_content_size, sizeof(saved_content_size));
-				sleep(2);
 			}
 			else {
 	   			perror("read");

@@ -81,7 +81,7 @@ long receive_message(int client_fd, long size, char *buffer) {
 	long received_bytes = 0;
 	ssize_t remaining_bytes = (ssize_t) size;
 	ssize_t read_bytes;
-	while(remaining_bytes	 > 0) {
+	while(remaining_bytes > 0) {
 		read_bytes = read(client_fd, buffer+received_bytes, remaining_bytes);
 		if(read_bytes > 0) {
 			received_bytes += read_bytes;
@@ -194,6 +194,8 @@ int main(int argc, char **argv) {
 
 	// If directory is not specified, use the IP address of the client as a directory name.
 	if(folder == NULL) folder = client_host;
+	
+	// To avoid condional jump on the uninitialized variable.
 	saved = NULL;
 
 	// Create a new directory
@@ -308,7 +310,6 @@ int main(int argc, char **argv) {
 
 		// Save data in buffer to the file.
 		fprintf(fp, "%s", buffer);
-		// What happens if the file is too big?
 
 		// Compare the filesize and the actual saved size
 		long sent_bytes = 0;
@@ -339,7 +340,7 @@ int main(int argc, char **argv) {
 
 		// Clean up.
 		free(buffer);
-		buffer = NULL;
+		buffer = NULL; // There were some memory errors without this line.
 
 		// Iterations
 		sleep(3);
