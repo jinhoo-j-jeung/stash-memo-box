@@ -283,7 +283,7 @@ int main(int argc, char **argv) {
 		FILE *fp = fopen(title, "a");
 		if(fp == NULL) {
 			perror("fopen");
-			close_server(5);
+			close_server(check_saved_status(total_txt_files));
 		}
 
 		// Receive file size from the client.
