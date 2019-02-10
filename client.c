@@ -20,11 +20,12 @@ typedef struct node {
 } node_t;
 
 // Global vaiables
-int sock_fd;	
+int sock_fd;
 struct addrinfo hints, *result;
 node_t *head = NULL;
 long num_txt_files = 0;
 char title[256], *content;
+int *saved, entirely_saved, partially_saved;
 
 // Helper function cleaning up before exiting.
 void close_client(int exit_code) {
@@ -44,18 +45,39 @@ void close_client(int exit_code) {
 	if(content != NULL) {
 		free(content);
 	}
+	if(saved != NULL) {
+		free(saved);
+	}
 	exit(exit_code);
+}
+
+// Helper function checking whether files are partially saved or entirely saved.
+int check_saved_status(int count) {
+	int exit_code = 5;
+	for(int i = 0; i < count; i++) {
+		if(saved[i]) partially_saved = 1;
+		else entirely_saved = 0;
+	}
+	if(!entirely_saved && partially_saved) {
+		fprintf(stderr, "Files are partially saved.\n");
+		exit_code = 1;
+	}
+	if(!entirely_saved && !partially_saved) {
+		fprintf(stderr, "No files are saved.\n");
+		exit_code = 2;
+	}
+	return exit_code;
 }
 
 // Custom signal handler
 void signal_handler(int sig) {
 	if(sig == SIGINT) {
 		fprintf(stderr, "SIGINT Caught!\n");
-		close_client(5);
+		close_client(check_saved_status((int) num_txt_files));
 	}
 	if(sig == SIGPIPE) {
 		fprintf(stderr, "SIGPIPE Caught!\n");
-		close_client(5);
+		close_client(check_saved_status((int) num_txt_files));
 	}
 	if(sig == SIGHUP) {
 		fprintf(stderr, "'%s' is being transferred: %li files left.\n", title, num_txt_files-1);	
@@ -141,6 +163,7 @@ int main(int argc, char **argv) {
 	sa.sa_flags = 0;
 	sigaction(SIGINT, &sa, NULL);
 	sigaction(SIGHUP, &sa, NULL);
+	sigaction(SIGPIPE, &sa, NULL);
 
 	// client requires 2 arguments: host and port.
 	if(argc != 3) {
@@ -192,6 +215,7 @@ int main(int argc, char **argv) {
 	// Linked list for saving .txt filename and its length.
 	head = malloc(sizeof(node_t));
 	node_t *tail = head;
+	saved = NULL;
 
 	// Open the current direcotry and find all .txt files.
 	DIR *d = opendir(".");
@@ -221,8 +245,17 @@ int main(int argc, char **argv) {
 	// Send the total number of text files to be sent.
 	total_sent_bytes += send_message_size(sock_fd, num_txt_files);
 
+	// Initialize saved array to check the entirety of file transfers.
+	saved = malloc(sizeof(int)*num_txt_files);
+	for(int i = 0; i < (int) num_txt_files; i++) {
+		saved[i] = 0;
+	}
+	entirely_saved = 1;
+	partially_saved = 0;
+
+	sleep(5);
+
 	// Send the actual content of txt files saved in the linked list.
-	int saved[num_txt_files];
 	int count = 0;
 	node_t *iter = head;
 	while(iter->message) {
@@ -255,7 +288,7 @@ int main(int argc, char **argv) {
 			}
 			else {
 	   			perror("read");
-				close_client(5);
+				close_client(check_saved_status((int) num_txt_files));
 			}
 		}
 		saved_content_size = (long) ntohl(saved_content_size);
@@ -274,7 +307,6 @@ int main(int argc, char **argv) {
 		content = NULL;
 
 		// Iteration
-		num_txt_files -= 1;
 		count += 1;
 		iter = iter->next;
 	}
@@ -283,8 +315,6 @@ int main(int argc, char **argv) {
 	fprintf(stdout, "total sent bytes: %li bytes\n", total_sent_bytes);
 
 	// Check whether the entire files are saved successfully.
-	int entirely_saved = 1;
-	int partially_saved = 0;
 	for(int i = 0; i < count; i++) {
 		if(saved[i]) partially_saved = 1;
 		else entirely_saved = 0;
@@ -306,6 +336,7 @@ int main(int argc, char **argv) {
 		free(iter);
 		iter = temp;
 	}
+	free(saved);
 	freeaddrinfo(result);
 	shutdown(sock_fd, SHUT_WR);
 

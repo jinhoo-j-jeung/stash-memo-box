@@ -12,10 +12,12 @@
 #include <signal.h>
 
 // Global variables
+int total_txt_files = 0;
 long num_txt_files = 0;
 char title[256], *buffer;
 int client_fd, server_fd;	
 struct addrinfo hints, *result;
+int *saved, entirely_saved, partially_saved;
 
 // Helper function cleaning up before exiting.
 void close_server(int exit_code) {
@@ -27,14 +29,35 @@ void close_server(int exit_code) {
 	if(buffer != NULL) {
 		free(buffer);
 	}
+	if(saved != NULL) {
+		free(saved);
+	}
 	exit(exit_code);
+}
+
+// Helper function checking whether files are partially saved or entirely saved.
+int check_saved_status(int count) {
+	int exit_code = 5;
+	for(int i = 0; i < count; i++) {
+		if(saved[i]) partially_saved = 1;
+		else entirely_saved = 0;
+	}
+	if(!entirely_saved && partially_saved) {
+		fprintf(stderr, "Files are partially saved.\n");
+		exit_code = 1;
+	}
+	if(!entirely_saved && !partially_saved) {
+		fprintf(stderr, "No files are saved.\n");
+		exit_code = 2;
+	}
+	return exit_code;
 }
 
 // Custom signal handler
 void signal_handler(int sig) {
 	if(sig == SIGINT) {
 		fprintf(stderr, "SIGINT raised: closing down.\n");
-		close_server(5);
+		close_server(check_saved_status((int) total_txt_files));
 	}
 	if(sig == SIGHUP) {
 		fprintf(stderr, "'%s' is being transferred: %li files left.\n", title, num_txt_files-1);	
@@ -171,7 +194,8 @@ int main(int argc, char **argv) {
 
 	// If directory is not specified, use the IP address of the client as a directory name.
 	if(folder == NULL) folder = client_host;
-	
+	saved = NULL;
+
 	// Create a new directory
 	struct stat st;
 	// If the directory does not exist already, make a new directory.
@@ -223,11 +247,15 @@ int main(int argc, char **argv) {
 	}
 	total_received_bytes += read_status;
 
+	// Initialize saved array to check the entirety of file transfers.
 	num_txt_files = ntohl(num_txt_files);
-	int saved[num_txt_files];
-	for(int i = 0; i < num_txt_files; i++) {
-		saved[num_txt_files] = 0;
+	total_txt_files = (int) num_txt_files;
+	saved = malloc(sizeof(int)*num_txt_files);
+	for(int i = 0; i < (int) num_txt_files; i++) {
+		saved[i] = 0;
 	}
+	entirely_saved = 1;
+	partially_saved = 0;
 	int count = 0;
 	while(num_txt_files > 0) {
 		// Receive length of title of file
@@ -323,8 +351,6 @@ int main(int argc, char **argv) {
 	fprintf(stdout, "total received bytes: %li bytes\n", total_received_bytes);
 
 	// Check whether the entire files are saved successfully.
-	int entirely_saved = 1;
-	int partially_saved = 0;
 	for(int i = 0; i < count; i++) {
 		if(saved[i]) partially_saved = 1;
 		else entirely_saved = 0;
@@ -341,6 +367,7 @@ int main(int argc, char **argv) {
 	// Clean up
 	shutdown(client_fd, SHUT_WR);
 	shutdown(server_fd, SHUT_WR);
+	free(saved);
 	freeaddrinfo(result);
 
 	return 0;
